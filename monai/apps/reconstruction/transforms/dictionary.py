@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 from collections.abc import Hashable, Mapping, Sequence
+from typing import Union
 
 import numpy as np
 from numpy import ndarray
@@ -24,6 +25,7 @@ from monai.transforms import InvertibleTransform
 from monai.transforms.croppad.array import SpatialCrop
 from monai.transforms.intensity.array import NormalizeIntensity
 from monai.transforms.transform import MapTransform, RandomizableTransform
+from monai.data import MetaTensor
 from monai.utils import FastMRIKeys
 from monai.utils.type_conversion import convert_to_tensor
 
@@ -44,12 +46,13 @@ class ExtractDataKeyFromMetaKeyd(MapTransform):
         In this case, ExtractDataKeyFromMetaKeyd moves "reconstruction_rss" to data.
     """
 
-    def __init__(self, keys: KeysCollection, meta_key: str, allow_missing_keys: bool = False, image_only: bool = False) -> None:
+    def __init__(self, keys: KeysCollection, meta_key: str, allow_missing_keys: bool = False, image_only: bool = False, inplace:bool = True) -> None:
         MapTransform.__init__(self, keys, allow_missing_keys)
         self.meta_key = meta_key
         self.image_only = image_only
+        self.inplace = inplace
 
-    def __call__(self, data: Mapping[Hashable, NdarrayOrTensor]) -> dict[Hashable, Tensor]:
+    def __call__(self, data: Union[Mapping[Hashable, NdarrayOrTensor], MetaTensor]) -> dict[Hashable, Tensor]:
         """
         Args:
             data: is a dictionary containing (key,value) pairs from the
@@ -58,16 +61,40 @@ class ExtractDataKeyFromMetaKeyd(MapTransform):
         Returns:
             the new data dictionary
         """
-        d = dict(data)
-        for key in self.keys:
-            if key in d[self.meta_key]:
-                d[key] = d[self.meta_key][key]  # type: ignore
-            elif not self.allow_missing_keys:
-                raise KeyError(
-                    f"Key `{key}` of transform `{self.__class__.__name__}` was missing in the meta data"
-                    " and allow_missing_keys==False."
-                )
-        return d  # type: ignore
+        if isinstance(data, Mapping):
+            d = dict(data)
+            for key in self.keys:
+                if key in d[self.meta_key]:
+                    d[key] = d[self.meta_key][key]  # type: ignore
+                elif not self.allow_missing_keys:
+                    raise KeyError(
+                        f"Key `{key}` of transform `{self.__class__.__name__}` was missing in the meta data"
+                        " and allow_missing_keys==False."
+                    )
+            return d  # type: ignore
+        
+        elif isinstance(data, MetaTensor) and self.inplace:
+            for key in self.keys:
+                if key in data.meta[self.meta_key] and key :
+                    data.meta[key] = data.meta[self.meta_key][key]
+                elif not self.allow_missing_keys:
+                    raise KeyError(
+                        f"Key `{key}` of transform `{self.__class__.__name__}` was missing in the meta data"
+                        " and allow_missing_keys==False."
+                    )
+            return data
+        
+        elif isinstance(data, MetaTensor) and not self.inplace:
+            new_meta = {k: v for k, v in data.meta.items() if k != 'affine'}
+            for key in self.keys:
+                if key in new_meta[self.meta_key]:
+                    new_meta[key] = new_meta[self.meta_key][key]
+                elif not self.allow_missing_keys:
+                    raise KeyError(
+                        f"Key `{key}` of transform `{self.__class__.__name__}` was missing in the meta data"
+                        " and allow_missing_keys==False."
+                    )
+            return MetaTensor(data.data, affine=data.affine, meta=new_meta)
 
 
 class RandomKspaceMaskd(RandomizableTransform, MapTransform):

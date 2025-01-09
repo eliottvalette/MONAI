@@ -1,59 +1,73 @@
 import json
-from monai.transforms.transform import MapTransform, Randomizable
+import torch
 from monai.apps.reconstruction.transforms.dictionary import ExtractDataKeyFromMetaKeyd
-import torch
 from monai.data import MetaTensor
-import torch
+import numpy as np
 
-'''
-# Simulated input data
-data = {
-    "image": torch.randn(1, 5, 5),  # Image tensor
-    "meta": {  # Metadata dictionary
-        "reconstruction_rss": torch.ones(5, 5),  # Ground truth image stored in meta
-        "patient_id": "12345"
+# Sample data for testing
+data_mapping = {
+    "image": "sample_image",
+    "meta": {
+        "reconstruction_rss": "sample_value1"
     }
 }
 
-# Define the transform
-extract_key_transform = ExtractDataKeyFromMetaKeyd(
-    keys=["reconstruction_rss", "patient_id"],  # Keys to move from meta to data
-    meta_key="meta",  # Where the metadata is stored
-    allow_missing_keys=False  # Raise an error if key is missing
-)
-
-# Apply the transform
-result = extract_key_transform(data)
-
-# Output the transformed data in pretty JSON format
-print("Transformed Data:")
-with open('first-issue-tests.json', 'w') as f:
-    f.write(json.dumps(result, indent=4, default=str))
-'''
-
-# Create a standard PyTorch tensor
-data = torch.tensor([[1, 2], [3, 4]])
-
-# Create an affine matrix for spatial transformation (optional)
-affine = torch.tensor(
+affine_1 = torch.tensor(
     [[2, 0, 0, 0],
      [0, 2, 0, 0],
      [0, 0, 2, 0],
      [0, 0, 0, 1]], dtype=torch.float64
 )
 
-# Add metadata to the tensor
-meta = {"description": "This is a sample tensor", "patient_id": "12345"}
-
-# Create a MetaTensor
-meta_tensor = MetaTensor(data, affine=affine, meta=meta)
-print(meta_tensor)
-
-# Apply ExtractDataKeyFromMetaKeyd to a MetaTensor object
-extract_key_transform = ExtractDataKeyFromMetaKeyd(
-    keys=["description", "patient_id"],  # Keys to move from meta to data
-    meta_key="meta",  # Where the metadata is stored
-    allow_missing_keys=False  # Raise an error if key is missing
+affine_2 = torch.tensor(
+    [[3, 0, 0, 0],
+     [0, 3, 0, 0],
+     [0, 0, 3, 0],
+     [0, 0, 0, 1]], dtype=torch.float64
 )
 
-print(extract_key_transform)
+data_meta_tensor_inplace = MetaTensor(
+    np.array([[1, 2], [3, 4]]),
+    affine=affine_1,
+    meta={
+        "meta": {"reconstruction_rss": "sample_value2", 
+                   "patient_id": "sample_patient_id"
+                },
+        "not-meta": {"random_key": "random_value",
+                     "random_key2": "random_value2"
+                    }
+        },
+)
+
+data_meta_tensor_not_inplace = MetaTensor(
+    np.array([[5, 6], [8, 9]]),
+    affine=affine_2,
+    meta={"meta": {"reconstruction_rss": "sample_value3", 
+                    "patient_id": "sample_patient_id"
+                },
+          "not-meta": {"random_key": "random_value",
+                            "random_key2": "random_value2"
+                }
+           },
+)
+
+# Instantiate the class
+extract_key_transform = ExtractDataKeyFromMetaKeyd(keys=["reconstruction_rss"], meta_key="meta", allow_missing_keys=False)
+
+# Apply the transform for Mapping
+print("Result for Mapping:")
+result_mapping = extract_key_transform(data_mapping)
+print(json.dumps(result_mapping, indent=4, default=str))
+
+# Apply the transform for MetaTensor inplace
+print("\nResult for MetaTensor inplace:")
+result_meta_tensor_inplace = extract_key_transform(data_meta_tensor_inplace)
+print('Inplace modified :', json.dumps(result_meta_tensor_inplace.meta, indent=4, default=str))
+print('\n Output', json.dumps(result_meta_tensor_inplace.meta, indent=4, default=str))
+
+# Apply the transform for MetaTensor not inplace
+print("\nResult for MetaTensor not inplace:")
+extract_key_transform.inplace = False
+result_meta_tensor_not_inplace = extract_key_transform(data_meta_tensor_not_inplace)
+print('Not Inplace Not modified :', json.dumps(data_meta_tensor_not_inplace.meta, indent=4, default=str))
+print('\n Output', json.dumps(result_meta_tensor_not_inplace.meta, indent=4, default=str))
