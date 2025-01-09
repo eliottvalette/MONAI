@@ -44,9 +44,10 @@ class ExtractDataKeyFromMetaKeyd(MapTransform):
         In this case, ExtractDataKeyFromMetaKeyd moves "reconstruction_rss" to data.
     """
 
-    def __init__(self, keys: KeysCollection, meta_key: str, allow_missing_keys: bool = False) -> None:
+    def __init__(self, keys: KeysCollection, meta_key: str, allow_missing_keys: bool = False, image_only: bool = False) -> None:
         MapTransform.__init__(self, keys, allow_missing_keys)
         self.meta_key = meta_key
+        self.image_only = image_only
 
     def __call__(self, data: Mapping[Hashable, NdarrayOrTensor]) -> dict[Hashable, Tensor]:
         """
