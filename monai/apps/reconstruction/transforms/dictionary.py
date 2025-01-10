@@ -46,10 +46,9 @@ class ExtractDataKeyFromMetaKeyd(MapTransform):
         In this case, ExtractDataKeyFromMetaKeyd moves "reconstruction_rss" to data.
     """
 
-    def __init__(self, keys: KeysCollection, meta_key: str, allow_missing_keys: bool = False, image_only: bool = False, inplace:bool = True) -> None:
+    def __init__(self, keys: KeysCollection, meta_key: str, allow_missing_keys: bool = False, inplace:bool = True) -> None:
         MapTransform.__init__(self, keys, allow_missing_keys)
         self.meta_key = meta_key
-        self.image_only = image_only
         self.inplace = inplace
 
     def __call__(self, data: Union[Mapping[Hashable, NdarrayOrTensor], MetaTensor]) -> dict[Hashable, Tensor]:
@@ -82,7 +81,7 @@ class ExtractDataKeyFromMetaKeyd(MapTransform):
                         f"Key `{key}` of transform `{self.__class__.__name__}` was missing in the meta data"
                         " and allow_missing_keys==False."
                     )
-            return data
+            return data.meta
         
         elif isinstance(data, MetaTensor) and not self.inplace:
             new_meta = {k: v for k, v in data.meta.items() if k != 'affine'}
@@ -94,7 +93,10 @@ class ExtractDataKeyFromMetaKeyd(MapTransform):
                         f"Key `{key}` of transform `{self.__class__.__name__}` was missing in the meta data"
                         " and allow_missing_keys==False."
                     )
-            return MetaTensor(data.data, affine=data.affine, meta=new_meta)
+            return new_meta
+        
+        else :
+            raise ValueError("data should be a dictionary or a MetaTensor")
 
 
 class RandomKspaceMaskd(RandomizableTransform, MapTransform):
