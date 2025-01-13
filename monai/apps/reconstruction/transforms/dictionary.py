@@ -29,148 +29,102 @@ from monai.data import MetaTensor
 from monai.utils import FastMRIKeys
 from monai.utils.type_conversion import convert_to_tensor
 
+from typing import Union, Mapping, Hashable
+
 
 class ExtractDataKeyFromMetaKeyd(MapTransform):
     """
-    Moves keys from meta to data. It is useful when a dataset of paired samples
-    is loaded and certain keys should be moved from meta to data.
+    Moves specified keys from a meta dictionary to top-level data keys, always returning a dictionary
+    (even when the input is a MetaTensor). It can also handle the case where the user wants only the 
+    image data, discarding other metadata.
 
     Args:
-        keys: keys to be transferred from meta to data
-        meta_key: the meta key where all the meta-data is stored (e.g. "image_meta_dict")
-        allow_missing_keys: if True, don't raise an exception if a requested key is missing
-        inplace: if True and data is a MetaTensor, modify `data.meta` in-place. Otherwise, create/return updated copies.
-        image_only: if True, the final output will only contain the image (or a dict with the image),
-                    discarding other keys. This mimics MONAI's `LoadImaged(image_only=True)` style.
-        img_key: the key to store/return the image under when `image_only=True`.
+        keys: The keys to extract from the meta dictionary (e.g., ["reconstruction_rss"]).
+        meta_key: The key in which metadata is stored (e.g., "image_meta_dict").
+        allow_missing_keys: If True, missing keys will not raise a KeyError.
+        image_only: If True, return only a dictionary containing {img_key: ...}. 
+                    The method will check both the top-level dictionary and the specified meta_key 
+                    for this img_key.
+        img_key: The key under which image data is stored or should be stored in the returned dictionary.
 
     Example:
-        If your data dictionary is like:
-            {
-              "image": MetaTensor(...),
-              "image_meta_dict": { "some_key": <value>, "other_key": <value> },
-              "label": <value>
-            }
-        and you want to move "some_key" from the meta dict into the top-level,
-        you could do: ExtractDataKeyFromMetaKeyd(keys=["some_key"], meta_key="image_meta_dict", image_only=False).
+        data = {
+            "image": MetaTensor(...),
+            "image_meta_dict": {"my_key": 123, "another_key": 456},
+            "label": 0
+        }
+        transform = ExtractDataKeyFromMetaKeyd(keys=["my_key"], meta_key="image_meta_dict", image_only=False)
+        result = transform(data)
+        # result is:
+        # {
+        #   "image": MetaTensor(...),
+        #   "image_meta_dict": {"my_key": 123, "another_key": 456},
+        #   "label": 0,
+        #   "my_key": 123
+        # }
     """
-
     def __init__(
         self,
         keys: KeysCollection,
         meta_key: str = "image_meta_dict",
         allow_missing_keys: bool = False,
-        inplace: bool = True,
         image_only: bool = False,
         img_key: str = "image",
     ) -> None:
         super().__init__(keys, allow_missing_keys)
         self.meta_key = meta_key
-        self.inplace = inplace
         self.image_only = image_only
         self.img_key = img_key
 
     def __call__(
         self, 
         data: Union[Mapping[Hashable, NdarrayOrTensor], MetaTensor]
-    ) -> Union[Mapping[Hashable, NdarrayOrTensor], MetaTensor]:
-        """
-        Args:
-            data: either a dictionary containing (key, value) pairs
-                  or a single MetaTensor (image with embedded metadata).
-
-        Returns:
-            - If input is a dictionary: returns a dictionary.
-            - If input is a MetaTensor and inplace=True: returns the same MetaTensor (possibly updated).
-            - If input is a MetaTensor and inplace=False: returns a new MetaTensor or dictionary,
-              depending on `image_only`.
-        """
-
+    ) -> Mapping[Hashable, NdarrayOrTensor]:
         if isinstance(data, Mapping):
             d = dict(data)
+            if self.image_only:
+                if self.img_key in d:
+                    return {self.img_key: d[self.img_key]}
+                if self.meta_key in d and self.img_key in d[self.meta_key]:
+                    return {self.img_key: d[self.meta_key][self.img_key]}
+                raise KeyError(f"'{self.img_key}' not found in data or data['{self.meta_key}'].")
+
             if self.meta_key not in d:
                 if not self.allow_missing_keys:
-                    raise KeyError(f"'{self.meta_key}' not found in data and allow_missing_keys=False.")
+                    raise KeyError(f"'{self.meta_key}' not found.")
                 return d
-
+            
             for key in self.keys:
                 if key in d[self.meta_key]:
                     d[key] = d[self.meta_key][key]
                 elif not self.allow_missing_keys:
-                    raise KeyError(
-                        f"Key '{key}' is missing in d['{self.meta_key}'] and allow_missing_keys=False."
-                    )
-
-            if self.image_only:
-                if self.img_key not in d:
-                    if not self.allow_missing_keys:
-                        raise KeyError(
-                            f"Key '{self.img_key}' not found in data, but image_only=True."
-                        )
-                    return d
-                return {self.img_key: d[self.img_key]}
-
+                    raise KeyError(f"Key '{key}' missing in '{self.meta_key}'.")
+                
             return d
 
-        elif isinstance(data, MetaTensor):
-            if not self.image_only and (self.meta_key not in data.meta):
+        if isinstance(data, MetaTensor):
+            d = dict(data.meta)
+            if self.image_only:
+                if self.img_key in d:
+                    return {self.img_key: d[self.img_key]}
+                if self.meta_key in d and self.img_key in d[self.meta_key]:
+                    return {self.img_key: d[self.meta_key][self.img_key]}
+                raise KeyError(f"'{self.img_key}' not found in data.meta or data.meta['{self.meta_key}'].")
+            
+            if self.meta_key not in d:
                 if not self.allow_missing_keys:
-                    raise KeyError(
-                        f"'{self.meta_key}' not found in data.meta and allow_missing_keys=False."
-                    )
-                return data
+                    raise KeyError(f"'{self.meta_key}' not found in data.meta.")
+                return d
+            
+            for key in self.keys:
+                if key in d[self.meta_key]:
+                    d[key] = d[self.meta_key][key]
+                elif not self.allow_missing_keys:
+                    raise KeyError(f"Key '{key}' missing in data.meta['{self.meta_key}'].")
+                
+            return d
 
-            if self.inplace:
-                if not self.image_only:
-                    for key in self.keys:
-                        if key in data.meta[self.meta_key]:
-                            data.meta[key] = data.meta[self.meta_key][key]
-                        elif not self.allow_missing_keys:
-                            raise KeyError(
-                                f"Key '{key}' is missing in data.meta['{self.meta_key}'] "
-                                "and allow_missing_keys=False."
-                            )
-                else:
-                    for key in self.keys:
-                        if key not in data.meta and not self.allow_missing_keys:
-                            raise KeyError(
-                                f"Key '{key}' is missing in data.meta and allow_missing_keys=False."
-                            )
-
-                if self.image_only:
-                    return {self.img_key: data}
-                else:
-                    return data
-
-            else:
-                new_meta = dict(data.meta) 
-                if not self.image_only:
-                    if self.meta_key in new_meta:
-                        for key in self.keys:
-                            if key in new_meta[self.meta_key]:
-                                new_meta[key] = new_meta[self.meta_key][key]
-                            elif not self.allow_missing_keys:
-                                raise KeyError(
-                                    f"Key '{key}' is missing in data.meta['{self.meta_key}'] "
-                                    "and allow_missing_keys=False."
-                                )
-                else:
-                    for key in self.keys:
-                        if key not in new_meta and not self.allow_missing_keys:
-                            raise KeyError(
-                                f"Key '{key}' is missing in data.meta and allow_missing_keys=False."
-                            )
-
-                if self.image_only:
-                    return {self.img_key: data}
-                else:
-                    new_data = data.clone()
-                    new_data.meta = new_meta
-                    return new_data
-
-        else:
-            raise ValueError("data should be a dictionary or a MetaTensor")
-
+        raise ValueError("Input must be a dictionary or a MetaTensor.")
 
 class RandomKspaceMaskd(RandomizableTransform, MapTransform):
     """
